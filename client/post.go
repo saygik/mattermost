@@ -4,6 +4,8 @@
 package mattermost
 
 import (
+	"encoding/json"
+	"net/http"
 	"sync"
 )
 
@@ -70,6 +72,27 @@ const (
 type StringInterface map[string]any
 type StringArray []string
 
+type MsgAttachmentField struct {
+	Short string `json:"short"`
+	Title string `json:"title"`
+	Value string `json:"value"`
+}
+type MsgAttachment struct {
+	Author    string               `json:"author_name"`
+	Color     string               `json:"color"`
+	Title     string               `json:"title"`
+	TitleLink string               `json:"title_link"`
+	ThumbUrl  string               `json:"thumb_url"`
+	Text      string               `json:"text"`
+	Pretext   string               `json:"pretext"`
+	Footer    string               `json:"footer"`
+	Fields    []MsgAttachmentField `json:"fields"`
+}
+
+type MsgProperties struct {
+	Attachments []MsgAttachment `json:"attachments"`
+}
+
 type Post struct {
 	Id         string `json:"id"`
 	CreateAt   int64  `json:"create_at"`
@@ -88,18 +111,63 @@ type Post struct {
 	// populate edit boxes if present.
 	MessageSource string `json:"message_source,omitempty"`
 
-	Type          string          `json:"type"`
-	propsMu       sync.RWMutex    `db:"-"`       // Unexported mutex used to guard Post.Props.
-	Props         StringInterface `json:"props"` // Deprecated: use GetProps()
-	Hashtags      string          `json:"hashtags"`
-	Filenames     StringArray     `json:"-"` // Deprecated, do not use this field any more
-	FileIds       StringArray     `json:"file_ids,omitempty"`
-	PendingPostId string          `json:"pending_post_id"`
-	HasReactions  bool            `json:"has_reactions,omitempty"`
-	RemoteId      *string         `json:"remote_id,omitempty"`
+	Type    string       `json:"type"`
+	propsMu sync.RWMutex `db:"-"` // Unexported mutex used to guard Post.Props.
+	//	Props         StringInterface `json:"props"` // Deprecated: use GetProps()
+	Properties    MsgProperties `json:"props"`
+	Hashtags      string        `json:"hashtags"`
+	Filenames     StringArray   `json:"-"` // Deprecated, do not use this field any more
+	FileIds       StringArray   `json:"file_ids,omitempty"`
+	PendingPostId string        `json:"pending_post_id"`
+	HasReactions  bool          `json:"has_reactions,omitempty"`
+	RemoteId      *string       `json:"remote_id,omitempty"`
 
 	// Transient data populated before sending a post to the client
 	ReplyCount  int64 `json:"reply_count"`
 	LastReplyAt int64 `json:"last_reply_at"`
 	IsFollowing *bool `json:"is_following,omitempty"` // for root posts in collapsed thread mode indicates if the current user is following this thread
+}
+
+func (c *Client4) CreatePost(post *Post) (*Post, *Response, error) {
+	postJSON, err := json.Marshal(post)
+	if err != nil {
+		return nil, nil, NewAppError("CreatePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	r, err := c.DoAPIPost(c.postsRoute(), string(postJSON))
+	if err != nil {
+		return nil, BuildResponse(r), err
+	}
+	defer closeBody(r)
+	var p Post
+	if r.StatusCode == http.StatusNotModified {
+		return &p, BuildResponse(r), nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		return nil, nil, NewAppError("CreatePost", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	return &p, BuildResponse(r), nil
+}
+
+func (c *Client4) CreateSimpleMessagePost(channelId, message, rootId string) (*Post, *Response, error) {
+	post := &Post{
+		RootId:    rootId,
+		ChannelId: channelId,
+		Message:   message,
+	}
+	return c.CreatePost(post)
+}
+func (c *Client4) CreatePostWithAttachtent(
+	channel, message, rootId string, msgProperties MsgProperties) (*Post, *Response, error) {
+	//	attachmentColor := GetAttachmentColor(messageLevel)
+	channelId, err := PrepareChannelId(c, channel)
+	if err != nil {
+		channelId = channel
+	}
+	post := &Post{
+		RootId:     rootId,
+		ChannelId:  channelId,
+		Message:    message,
+		Properties: msgProperties,
+	}
+	return c.CreatePost(post)
 }

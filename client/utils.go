@@ -1,106 +1,126 @@
-/*
-  Copyright 2021-2022 Davide Madrisan <davide.madrisan@gmail.com>
-
-  Licensed under the Mozilla Public License, Version 2.0 (the "License");
-  you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at
-
-      https://www.mozilla.org/en-US/MPL/2.0/
-
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
-*/
-
-// Package mattermost implements the API v4 calls to Mattemost.
 package mattermost
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
+	"net/http"
 	"strings"
 )
 
-// forgeAPIv4URL returns the Mattermost APIv4 URL for the given endpoint.
-func forgeAPIv4URL(baseURL, endpoint string) string {
-	var url = fmt.Sprintf("%s/api/v4/%s",
-		strings.TrimRight(baseURL, "/"),
-		strings.TrimLeft(endpoint, "/"))
-	return url
+const (
+	colorCritical = "#FF0000" // The color code for critical messages.
+	colorInfo     = "#E0E0D1" // The color code for informational messages.
+	colorSuccess  = "#00FF00" // The color code for successful messages.
+	colorWarning  = "#FF8000" // The color code for warning messages.
+	colorDefault  = "#E0E0D1" // The default color.
+)
+
+func GetAttachmentColor(level string) string {
+	var color = map[string]string{
+		"critical": colorCritical,
+		"info":     colorInfo,
+		"success":  colorSuccess,
+		"warning":  colorWarning,
+	}
+
+	if c, found := color[level]; found {
+		return c
+	}
+
+	return colorDefault
 }
 
-// forgeBearerAuthentication returns the string to be sent to Mattermost for a Bearer Authentication.
-func forgeBearerAuthentication(accessToken string) string {
-	return "Bearer " + accessToken
-}
-
-// getAccessToken returns the Mattermost token set at command-line or via the environment variable MATTERMOST_ACCESS_TOKEN.
-func getAccessToken() (string, error) {
-	accessToken := os.Getenv("TOKEN")
-	if accessToken == "" {
-		return "", fmt.Errorf("the Mattermost Access Token has not been set")
-	}
-	return accessToken, nil
-}
-
-// getUrl returns the Mattermost URL set at command-line or via the environment variable MATTERMOST_URL.
-func getURL() (string, error) {
-	baseURL := os.Getenv("URL")
-	if baseURL == "" {
-		return "", fmt.Errorf("the Mattermost URL has not been set")
-	}
-	return baseURL, nil
-}
-
-// CreateMsgPayload forges the payload containing the message to be posted to Mattermost
-func CreateMsgPayload(
-	attachmentColor,
-	mattermostChannelID,
-	messageAuthor, messageContent, messageTitle string) ([]byte, error) {
-
-	type MsgAttachment struct {
-		Author string `json:"author_name"`
-		Color  string `json:"color"`
-		Title  string `json:"title"`
-		Text   string `json:"text"`
+func AppErrorFromJSON(data io.Reader) *AppError {
+	str := ""
+	bytes, rerr := io.ReadAll(data)
+	if rerr != nil {
+		str = rerr.Error()
+	} else {
+		str = string(bytes)
 	}
 
-	type MsgProperties struct {
-		Attachments []MsgAttachment `json:"attachments"`
-	}
-
-	// MsgPayload is used to create the JSON payload used when posting a message to Mattermost.
-	type MsgPayload struct {
-		ID         string        `json:"channel_id"`
-		RootId     string        `json:"root_id"`
-		Properties MsgProperties `json:"props"`
-	}
-
-	data := MsgPayload{
-		ID:     mattermostChannelID,
-		RootId: "64036",
-		Properties: MsgProperties{
-			[]MsgAttachment{
-				{
-					Author: messageAuthor,
-					Color:  attachmentColor,
-					Title:  messageTitle,
-					Text:   messageContent,
-				},
-			},
-		},
-	}
-
-	payload, err := json.Marshal(data)
+	decoder := json.NewDecoder(strings.NewReader(str))
+	var er AppError
+	err := decoder.Decode(&er)
 	if err != nil {
-		return nil, err
+		return NewAppError("AppErrorFromJSON", "model.utils.decode_json.app_error", nil, "body: "+str, http.StatusInternalServerError).Wrap(err)
+	}
+	return &er
+}
+
+type AppError struct {
+	Id            string `json:"id"`
+	Message       string `json:"message"`               // Message to be display to the end user without debugging information
+	DetailedError string `json:"detailed_error"`        // Internal error string to help the developer
+	RequestId     string `json:"request_id,omitempty"`  // The RequestId that's also set in the header
+	StatusCode    int    `json:"status_code,omitempty"` // The http status code
+	Where         string `json:"-"`                     // The function where it happened in the form of Struct.Func
+	IsOAuth       bool   `json:"is_oauth,omitempty"`    // Whether the error is OAuth specific
+	params        map[string]any
+	wrapped       error
+}
+
+func (er *AppError) Error() string {
+	var sb strings.Builder
+
+	// render the error information
+	sb.WriteString(er.Where)
+	sb.WriteString(": ")
+	sb.WriteString(er.Message)
+
+	// only render the detailed error when it's present
+	if er.DetailedError != "" {
+		sb.WriteString(", ")
+		sb.WriteString(er.DetailedError)
 	}
 
-	return payload, nil
+	// render the wrapped error
+	err := er.wrapped
+	if err != nil {
+		sb.WriteString(", ")
+		sb.WriteString(err.Error())
+	}
+
+	return sb.String()
+}
+func NewAppError(where string, id string, params map[string]any, details string, status int) *AppError {
+	ap := &AppError{
+		Id:            id,
+		params:        params,
+		Message:       id,
+		Where:         where,
+		DetailedError: details,
+		StatusCode:    status,
+		IsOAuth:       false,
+	}
+	return ap
+}
+func (er *AppError) Unwrap() error {
+	return er.wrapped
+}
+
+func (er *AppError) Wrap(err error) *AppError {
+	er.wrapped = err
+	return er
+}
+
+type StringMap map[string]string
+
+func ArrayToJSON(objmap []string) string {
+	b, _ := json.Marshal(objmap)
+	return string(b)
+}
+
+func ArrayFromJSON(data io.Reader) []string {
+	var objmap []string
+
+	json.NewDecoder(data).Decode(&objmap)
+	if objmap == nil {
+		return make([]string, 0)
+	}
+
+	return objmap
 }
 
 // PrettyPrint prints the result of a Mattermost query in a pretty JSON format.

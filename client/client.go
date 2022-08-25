@@ -2,7 +2,6 @@ package mattermost
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -87,29 +86,6 @@ func NewAPIv4Client(url string) *Client4 {
 	return &Client4{url, url + APIURLSuffix, &http.Client{}, "", "", map[string]string{}, "", ""}
 }
 
-func (c *Client4) CreatePost(post *Post) (*Post, *Response, error) {
-	postJSON, err := json.Marshal(post)
-	if err != nil {
-		return nil, nil, NewAppError("CreatePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
-	}
-	r, err := c.DoAPIPost(c.postsRoute(), string(postJSON))
-	if err != nil {
-		return nil, BuildResponse(r), err
-	}
-	defer closeBody(r)
-	var p Post
-	if r.StatusCode == http.StatusNotModified {
-		return &p, BuildResponse(r), nil
-	}
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		return nil, nil, NewAppError("CreatePost", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
-	}
-	return &p, BuildResponse(r), nil
-}
-func (c *Client4) postsRoute() string {
-	return "/posts"
-}
-
 func (c *Client4) DoAPIGet(url string, etag string) (*http.Response, error) {
 	return c.DoAPIRequest(http.MethodGet, c.APIURL+url, "", etag)
 }
@@ -118,6 +94,17 @@ func (c *Client4) DoAPIPost(url string, data string) (*http.Response, error) {
 	return c.DoAPIRequest(http.MethodPost, c.APIURL+url, data, "")
 }
 
+func (c *Client4) DoAPIPut(url string, data string) (*http.Response, error) {
+	return c.DoAPIRequest(http.MethodPut, c.APIURL+url, data, "")
+}
+
+func (c *Client4) DoAPIPutBytes(url string, data []byte) (*http.Response, error) {
+	return c.DoAPIRequestBytes(http.MethodPut, c.APIURL+url, data, "")
+}
+
+func (c *Client4) DoAPIDelete(url string) (*http.Response, error) {
+	return c.DoAPIRequest(http.MethodDelete, c.APIURL+url, "", "")
+}
 func (c *Client4) DoAPIRequest(method, url, data, etag string) (*http.Response, error) {
 	return c.DoAPIRequestReader(method, url, strings.NewReader(data), map[string]string{HeaderEtagClient: etag})
 }
