@@ -5,6 +5,9 @@ import "fmt"
 func (c *Client4) postsRoute() string {
 	return "/posts"
 }
+func (c *Client4) postRoute(postId string) string {
+	return fmt.Sprintf(c.postsRoute()+"/%v", postId)
+}
 func (c *Client4) usersRoute() string {
 	return "/users"
 }

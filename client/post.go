@@ -171,3 +171,33 @@ func (c *Client4) CreatePostWithAttachtent(
 	}
 	return c.CreatePost(post)
 }
+
+// UpdatePost updates a post based on the provided post struct.
+func (c *Client4) UpdatePost(postId string, post *Post) (*Post, *Response, error) {
+	postJSON, err := json.Marshal(post)
+	if err != nil {
+		return nil, nil, NewAppError("UpdatePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	r, err := c.DoAPIPut(c.postRoute(postId), string(postJSON))
+	if err != nil {
+		return nil, BuildResponse(r), err
+	}
+	defer closeBody(r)
+	var p Post
+	if r.StatusCode == http.StatusNotModified {
+		return &p, BuildResponse(r), nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		return nil, nil, NewAppError("UpdatePost", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	return &p, BuildResponse(r), nil
+}
+func (c *Client4) UpdatePostWithAttachtent(
+	postId, message string, msgProperties MsgProperties) (*Post, *Response, error) {
+	post := &Post{
+		Id:         postId,
+		Message:    message,
+		Properties: msgProperties,
+	}
+	return c.UpdatePost(postId, post)
+}
