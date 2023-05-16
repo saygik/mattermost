@@ -92,7 +92,13 @@ type MsgAttachment struct {
 type MsgProperties struct {
 	Attachments []MsgAttachment `json:"attachments"`
 }
-
+type MsgPriority struct {
+	Priority     string `json:"priority"`
+	RequestedAck bool   `json:"requested_ack"`
+}
+type MsgMetadata struct {
+	Priority MsgPriority `json:"priority"`
+}
 type Post struct {
 	Id         string `json:"id"`
 	CreateAt   int64  `json:"create_at"`
@@ -115,6 +121,7 @@ type Post struct {
 	propsMu sync.RWMutex `db:"-"` // Unexported mutex used to guard Post.Props.
 	//	Props         StringInterface `json:"props"` // Deprecated: use GetProps()
 	Properties    MsgProperties `json:"props"`
+	Metadata      MsgMetadata   `json:"metadata"`
 	Hashtags      string        `json:"hashtags"`
 	Filenames     StringArray   `json:"-"` // Deprecated, do not use this field any more
 	FileIds       StringArray   `json:"file_ids,omitempty"`
@@ -157,7 +164,7 @@ func (c *Client4) CreateSimpleMessagePost(channelId, message, rootId string) (*P
 	return c.CreatePost(post)
 }
 func (c *Client4) CreatePostWithAttachtent(
-	channel, message, rootId string, msgProperties MsgProperties) (*Post, *Response, error) {
+	channel, message, rootId string, msgProperties MsgProperties, msgMetadata MsgMetadata) (*Post, *Response, error) {
 	//	attachmentColor := GetAttachmentColor(messageLevel)
 	channelId, err := PrepareChannelId(c, channel)
 	if err != nil {
@@ -168,6 +175,7 @@ func (c *Client4) CreatePostWithAttachtent(
 		ChannelId:  channelId,
 		Message:    message,
 		Properties: msgProperties,
+		Metadata:   msgMetadata,
 	}
 	return c.CreatePost(post)
 }
