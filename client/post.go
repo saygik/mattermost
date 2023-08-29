@@ -93,11 +93,11 @@ type MsgProperties struct {
 	Attachments []MsgAttachment `json:"attachments"`
 }
 type MsgPriority struct {
-	Priority     string `json:"priority"`
-	RequestedAck bool   `json:"requested_ack"`
+	Priority     string `json:"priority,omitempty"`
+	RequestedAck bool   `json:"requested_ack,omitempty"`
 }
 type MsgMetadata struct {
-	Priority MsgPriority `json:"priority"`
+	Priority MsgPriority `json:"priority,omitempty"`
 }
 type Post struct {
 	Id         string `json:"id"`
@@ -121,7 +121,7 @@ type Post struct {
 	propsMu sync.RWMutex `db:"-"` // Unexported mutex used to guard Post.Props.
 	//	Props         StringInterface `json:"props"` // Deprecated: use GetProps()
 	Properties    MsgProperties `json:"props"`
-	Metadata      MsgMetadata   `json:"metadata"`
+	Metadata      *MsgMetadata  `json:"metadata,omitempty"`
 	Hashtags      string        `json:"hashtags"`
 	Filenames     StringArray   `json:"-"` // Deprecated, do not use this field any more
 	FileIds       StringArray   `json:"file_ids,omitempty"`
@@ -130,9 +130,34 @@ type Post struct {
 	RemoteId      *string       `json:"remote_id,omitempty"`
 
 	// Transient data populated before sending a post to the client
-	ReplyCount  int64 `json:"reply_count"`
-	LastReplyAt int64 `json:"last_reply_at"`
+	ReplyCount int64 `json:"reply_count"`
+	//LastReplyAt int64 `json:"last_reply_at,omitempty"`
 	IsFollowing *bool `json:"is_following,omitempty"` // for root posts in collapsed thread mode indicates if the current user is following this thread
+}
+type SimplePost struct {
+	ChannelId string `json:"channel_id"`
+	RootId    string `json:"root_id"`
+	Message   string `json:"message"`
+}
+
+func (c *Client4) CreateSimplePost(post *SimplePost) (*Post, *Response, error) {
+	postJSON, err := json.Marshal(post)
+	if err != nil {
+		return nil, nil, NewAppError("CreatePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	r, err := c.DoAPIPost(c.postsRoute(), string(postJSON))
+	if err != nil {
+		return nil, BuildResponse(r), err
+	}
+	defer closeBody(r)
+	var p Post
+	if r.StatusCode == http.StatusNotModified {
+		return &p, BuildResponse(r), nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		return nil, nil, NewAppError("CreatePost", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	return &p, BuildResponse(r), nil
 }
 
 func (c *Client4) CreatePost(post *Post) (*Post, *Response, error) {
@@ -156,12 +181,12 @@ func (c *Client4) CreatePost(post *Post) (*Post, *Response, error) {
 }
 
 func (c *Client4) CreateSimpleMessagePost(channelId, message, rootId string) (*Post, *Response, error) {
-	post := &Post{
+	post := &SimplePost{
 		RootId:    rootId,
 		ChannelId: channelId,
 		Message:   message,
 	}
-	return c.CreatePost(post)
+	return c.CreateSimplePost(post)
 }
 func (c *Client4) CreatePostWithAttachtent(
 	channel, message, rootId string, msgProperties MsgProperties, msgMetadata MsgMetadata) (*Post, *Response, error) {
@@ -175,7 +200,7 @@ func (c *Client4) CreatePostWithAttachtent(
 		ChannelId:  channelId,
 		Message:    message,
 		Properties: msgProperties,
-		Metadata:   msgMetadata,
+		Metadata:   &msgMetadata,
 	}
 	return c.CreatePost(post)
 }
