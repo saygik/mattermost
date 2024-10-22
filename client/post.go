@@ -69,7 +69,7 @@ const (
 	ModifierFiles    string = "files"
 )
 
-type StringInterface map[string]any
+type StringInterface map[string]interface{}
 type StringArray []string
 
 type MsgAttachmentField struct {
